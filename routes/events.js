@@ -288,6 +288,10 @@ async function publishAlert({
   if (telegram) {
     const timeStr = fmtIST(when) + " IST";
     const delayNotice = delayMins > 0 ? `Public Feed (${delayMins}-Min Delay)` : `Instant Real-Time Feed`;
+    const delayLine =
+      delayMins > 0
+        ? `⏳ Feed Delay:          ${delayMins} Minutes (Sent after 10 mins)\n⚠️ Note:                Screenshot captured 10 mins ago\n`
+        : `⏳ Feed Status:         Instant Real-Time Feed\n`;
     const isAvailable =
       available === true &&
       earliestDate &&
@@ -314,7 +318,7 @@ async function publishAlert({
         `🔢 Slots on Date:       ${slotsDisplay}\n` +
         `📊 Total Dates Open:    ${totalDisplay}\n` +
         `🕒 Detected At:         ${timeStr}\n` +
-        `⏳ Feed Status:         ${delayNotice}\n` +
+        delayLine +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `🌐 Track Live: usvisaslotsupdate.com`;
     } else {
@@ -328,7 +332,7 @@ async function publishAlert({
         `🔢 Slots Available:     0\n` +
         `📊 Total Dates Open:    0\n` +
         `🕒 Checked At:          ${timeStr}\n` +
-        `⏳ Feed Status:         ${delayNotice}\n` +
+        delayLine +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `🛰️ 24/7 Automated Consular Scanner Active\n` +
         `🌐 Track Live: usvisaslotsupdate.com`;
