@@ -209,38 +209,19 @@ router.post("/", requireAdminOrExtensionKey, async (req, res) => {
   });
 
   if (screenshot) {
-    const delayMins = typeof env.alertDelayMinutes === "number" ? env.alertDelayMinutes : 10;
-    const delayMs = delayMins * 60 * 1000;
-    const delayNotice = delayMins > 0 ? `⏳ Feed Delay: 10 Minutes (Screenshot sent after 10 mins)\n⚠️ Note: Screenshot captured 10 mins ago` : null;
-
     const caption = [
-      `🇺🇸 US VISA APPOINTMENT UPDATE`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `📋 Category: ${group}`,
-      location ? `📍 Location: ${location}` : null,
-      date ? `📅 Date: ${date}` : null,
-      count ? `🔢 Slots: ${count}` : null,
-      note ? `📝 Note: ${note}` : null,
-      delayNotice,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `🌐 Track Live: usvisaslotsupdate.com`,
+      `Category: ${group}`,
+      location ? `Location: ${location}` : null,
+      date ? `Date: ${date}` : null,
+      count ? `Slots: ${count}` : null,
+      note ? `Note: ${note}` : null,
     ]
       .filter(Boolean)
       .join("\n");
-
-    if (delayMs > 0) {
-      console.log(`[updates] ⏳ 10-Minute Delay Active: Queuing Telegram photo for ${group} @ ${location} (Will send in 10 mins)`);
-      setTimeout(() => {
-        sendTelegramPhoto(screenshot, caption, group).catch((e) =>
-          console.error("[updates] Delayed Telegram send failed:", e.message)
-        );
-      }, delayMs);
-    } else {
-      try {
-        await sendTelegramPhoto(screenshot, caption, group);
-      } catch (e) {
-        console.error("[updates] Telegram send failed:", e.message);
-      }
+    try {
+      await sendTelegramPhoto(screenshot, caption, group);
+    } catch (e) {
+      console.error("[updates] Telegram send failed:", e.message);
     }
   }
 

@@ -220,7 +220,7 @@ router.post("/", eventLimiter, requireAdminOrExtensionKey, async (req, res) => {
     lastChangeAt: event.detectedAt,
   });
 
-  const delayMins = reason === "manual-test" ? 0 : typeof env.alertDelayMinutes === "number" ? env.alertDelayMinutes : 10;
+  const delayMins = 10;
   const delayMs = delayMins * 60 * 1000;
 
   const alertPayload = {
@@ -287,11 +287,8 @@ async function publishAlert({
   // Alerts to Telegram
   if (telegram) {
     const timeStr = fmtIST(when) + " IST";
-    const delayNotice = delayMins > 0 ? `Public Feed (${delayMins}-Min Delay)` : `Instant Real-Time Feed`;
-    const delayLine =
-      delayMins > 0
-        ? `⏳ Feed Delay:          ${delayMins} Minutes (Sent after 10 mins)\n⚠️ Note:                Screenshot captured 10 mins ago\n`
-        : `⏳ Feed Status:         Instant Real-Time Feed\n`;
+    const delayNotice = "10 Minutes (Sent after 10 mins)";
+    const delayLine = `⏳ Feed Delay:          10 Minutes (Sent after 10 mins)\n⚠️ Note:                Screenshot captured 10 mins ago\n`;
     const isAvailable =
       available === true &&
       earliestDate &&
