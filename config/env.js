@@ -1,4 +1,5 @@
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 // Validate and normalise environment configuration once, at startup.
 function required(name) {
@@ -25,6 +26,7 @@ const env = {
 
   adminEmail: optional("ADMIN_EMAIL"),
   adminPassword: optional("ADMIN_PASSWORD"),
+  adminWhatsApp: optional("ADMIN_WHATSAPP", "918143852523@c.us"),
   extensionApiKey: optional("EXTENSION_API_KEY"),
 
   // comma-separated list of allowed browser origins; "*" allows any
@@ -43,7 +45,17 @@ const env = {
     defaultChannel: optional("TELEGRAM_CHAT_ID_DEFAULT"),
   },
 
-  alertDelayMinutes: parseInt(optional("ALERT_DELAY_MINUTES", "10"), 10),
+  alertDelayMinutes: parseInt(optional("ALERT_DELAY_MINUTES", "5"), 10),
+  whatsapp: {
+    // Set in backend/.env or Render environment variables; never put in the extension.
+    publisherToken: optional("WHATSAPP_PUBLISHER_TOKEN"),
+    backendUrl: optional("BACKEND_URL", "http://localhost:5000"),
+    groups: {
+      "B1/B2": optional("WHATSAPP_GROUP_B1B2", "120363409650684618@g.us"),
+      "F1/F2": optional("WHATSAPP_GROUP_F1F2", "120363433828045224@g.us"),
+      "H1B/H4": optional("WHATSAPP_GROUP_H1BH4", "120363410431386086@g.us"),
+    },
+  },
   geminiApiKey: optional("GEMINI_API_KEY"),
 };
 

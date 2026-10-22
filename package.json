@@ -7,7 +7,10 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "whatsapp": "node whatsappPublisher.js",
+    "whatsapp:test": "node whatsappPublisher.js --test",
+    "whatsapp:scan": "node whatsappPublisher.js --scan"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -23,6 +26,8 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.5.0",
     "morgan": "^1.10.0",
-    "nodemailer": "^10.0.12"
+    "nodemailer": "^10.0.12",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "github:Rajojha-1/whatsapp-web.js#fix/wid-serialized-dollar1-fallback"
   }
 }

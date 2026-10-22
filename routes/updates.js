@@ -18,7 +18,27 @@ router.get("/", async (req, res) => {
   if (req.query.category) {
     const group = normalizeCategory(req.query.category);
     if (!group) return res.status(400).json({ error: "Unknown category" });
-    match.category = group;
+    if (group === "H1B/H4") {
+      match.$or = [
+        { category: "H1B/H4" },
+        { category: { $regex: /^H[-_ ]*1|^H[-_ ]*4/i } },
+        { type: { $regex: /H1B|H-1B|H4|H-4/i } },
+      ];
+    } else if (group === "B1/B2") {
+      match.$or = [
+        { category: "B1/B2" },
+        { category: { $regex: /^B[-_ ]*1|^B[-_ ]*2/i } },
+        { type: { $regex: /B1|B2/i } },
+      ];
+    } else if (group === "F1/F2") {
+      match.$or = [
+        { category: "F1/F2" },
+        { category: { $regex: /^F[-_ ]*1|^F[-_ ]*2/i } },
+        { type: { $regex: /F1|F2/i } },
+      ];
+    } else {
+      match.category = group;
+    }
   }
   const updates = await Update.aggregate([
     { $match: match },
@@ -47,14 +67,21 @@ router.get("/:id/screenshot", async (req, res) => {
   } catch {
     return res.status(400).end();
   }
-  const m = doc && /^data:(image\/[\w+.-]+);base64,(.+)$/s.exec(doc.screenshotUrl || "");
-  if (!m) return res.status(404).end();
-  res.set("Content-Type", m[1]);
+  if (!doc || !doc.screenshotUrl || !doc.screenshotUrl.startsWith("data:")) {
+    return res.status(404).end();
+  }
+  const commaIdx = doc.screenshotUrl.indexOf(",");
+  if (commaIdx === -1) return res.status(404).end();
+  const header = doc.screenshotUrl.slice(0, commaIdx);
+  const mime = header.split(";")[0].replace(/^data:/, "") || "image/png";
+  const b64 = doc.screenshotUrl.slice(commaIdx + 1);
+
+  res.set("Content-Type", mime);
   res.set("Cache-Control", "public, max-age=31536000, immutable");
   // allow the website (different origin) to embed this image — helmet defaults
   // this to same-origin, which blocks the <img> tag on the dashboard/board
   res.set("Cross-Origin-Resource-Policy", "cross-origin");
-  res.send(Buffer.from(m[2], "base64"));
+  res.send(Buffer.from(b64, "base64"));
 });
 
 // PUBLIC: counts per group for the last N days.
@@ -74,70 +101,78 @@ router.get("/summary", async (req, res) => {
 // PUBLIC: latest availability table overview per category and location
 router.get("/overview", async (req, res) => {
   try {
-    // Purge any stale/corrupted error records from database asynchronously
-    Update.deleteMany({
-      $or: [
-        { date: { $regex: /error|denied|timeout|loading|unwanted|no dates|checked|no appointments|^available$|^n\/a$/i } },
-        { count: { $in: ["0", 0, "N/A", "-", "", null] } },
-        { note: { $regex: /error|denied|timeout|loading|unwanted/i } },
-        { screenshotUrl: { $in: [null, ""] } },
-      ],
-    }).catch(() => {});
-
-    Event.deleteMany({
-      $or: [
-        { earliestDate: { $regex: /error|denied|timeout|loading|unwanted|no dates|checked|no appointments|^available$|^n\/a$/i } },
-        { slots: { $in: ["0", 0, "N/A", "-", "", null] } },
-        { currentAvailability: { $regex: /error|denied|timeout|loading|unwanted/i } },
-      ],
-    }).catch(() => {});
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
 
     const invalidDatePattern = /error|denied|timeout|loading|unwanted|no dates|checked|no appointments|^available$|^n\/a$/i;
     const invalidCounts = ["0", 0, "N/A", "-", "", null];
 
-    const latestUpdates = await Update.aggregate([
-      {
-        $match: {
-          date: { $exists: true, $ne: "", $not: invalidDatePattern },
-          count: { $nin: invalidCounts },
-          screenshotUrl: { $exists: true, $ne: null, $ne: "" },
-          note: { $not: /error|denied|timeout|loading|unwanted/i },
+    const [latestUpdates, latestEvents] = await Promise.all([
+      Update.aggregate([
+        {
+          $match: {
+            date: { $exists: true, $ne: "", $not: invalidDatePattern },
+            count: { $nin: invalidCounts },
+            note: { $not: /error|denied|timeout|loading|unwanted/i },
+          },
         },
-      },
-      { $sort: { capturedAt: -1 } },
-      {
-        $group: {
-          _id: { category: "$category", location: "$location" },
-          doc: { $first: "$$ROOT" },
+        { $sort: { capturedAt: -1 } },
+        {
+          $group: {
+            _id: { category: "$category", location: "$location" },
+            doc: {
+              $first: {
+                _id: "$_id",
+                category: "$category",
+                location: "$location",
+                type: "$type",
+                date: "$date",
+                count: "$count",
+                totalDates: "$totalDates",
+                capturedAt: "$capturedAt",
+                hasScreenshot: { $cond: [{ $and: [{ $ne: ["$screenshotUrl", null] }, { $ne: ["$screenshotUrl", ""] }] }, true, false] },
+              },
+            },
+          },
         },
-      },
-      { $replaceRoot: { newRoot: "$doc" } },
-      { $sort: { capturedAt: -1 } },
+        { $replaceRoot: { newRoot: "$doc" } },
+        { $sort: { capturedAt: -1 } },
+      ]),
+      Event.aggregate([
+        {
+          $match: {
+            available: true,
+            earliestDate: { $exists: true, $ne: "", $not: invalidDatePattern },
+            slots: { $nin: invalidCounts },
+            currentAvailability: { $not: /error|denied|timeout|loading|unwanted/i },
+          },
+        },
+        { $sort: { detectedAt: -1 } },
+        {
+          $group: {
+            _id: { group: "$group", location: "$location" },
+            doc: {
+              $first: {
+                _id: "$_id",
+                group: "$group",
+                category: "$category",
+                location: "$location",
+                earliestDate: "$earliestDate",
+                slots: "$slots",
+                totalDates: "$totalDates",
+                detectedAt: "$detectedAt",
+                hasScreenshot: { $cond: [{ $and: [{ $ne: ["$screenshotUrl", null] }, { $ne: ["$screenshotUrl", ""] }] }, true, false] },
+              },
+            },
+          },
+        },
+        { $replaceRoot: { newRoot: "$doc" } },
+        { $sort: { detectedAt: -1 } },
+      ]),
     ]);
 
-    const latestEvents = await Event.aggregate([
-      {
-        $match: {
-          available: true,
-          earliestDate: { $exists: true, $ne: "", $not: invalidDatePattern },
-          slots: { $nin: invalidCounts },
-          screenshotUrl: { $exists: true, $ne: null, $ne: "" },
-          previousAvailability: { $not: /error/i },
-          currentAvailability: { $not: /error|denied|timeout|loading|unwanted/i },
-        },
-      },
-      { $sort: { detectedAt: -1 } },
-      {
-        $group: {
-          _id: { group: "$group", location: "$location" },
-          doc: { $first: "$$ROOT" },
-        },
-      },
-      { $replaceRoot: { newRoot: "$doc" } },
-      { $sort: { detectedAt: -1 } },
-    ]);
-
-    const grouped = {};
+    const grouped = { "B1/B2": [], "F1/F2": [], "H1B/H4": [] };
 
     for (const u of latestUpdates) {
       const cat = u.category;
@@ -149,8 +184,8 @@ router.get("/overview", async (req, res) => {
         slots: u.count != null ? String(u.count) : "1",
         totalDates: u.totalDates != null ? String(u.totalDates) : "1",
         lastSeen: u.capturedAt,
-        customScreenshot: u.screenshotUrl || null,
         screenshotId: u._id,
+        hasScreenshot: u.hasScreenshot,
       });
     }
 
@@ -164,8 +199,8 @@ router.get("/overview", async (req, res) => {
         slots: ev.slots || "1",
         totalDates: ev.totalDates || "1",
         lastSeen: ev.detectedAt,
-        customScreenshot: ev.screenshotUrl || null,
         screenshotId: ev._id,
+        hasScreenshot: ev.hasScreenshot,
       };
       const existingIdx = grouped[cat].findIndex((r) => r.location === ev.location);
       if (existingIdx >= 0) {

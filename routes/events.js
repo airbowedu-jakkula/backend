@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const router = express.Router();
 const env = require("../config/env");
 const Event = require("../models/Event");
+const WhatsAppJob = require("../models/WhatsAppJob");
 const User = require("../models/User");
 const MonitorStatus = require("../models/MonitorStatus");
 const Update = require("../models/Update");
@@ -177,33 +178,36 @@ router.post("/", eventLimiter, requireAdminOrExtensionKey, async (req, res) => {
   });
 
   // IMMEDIATELY mirror genuine slot openings to public Update collection for live website overview
-  const isAvailableOpening =
-    available === true &&
-    earliestDate &&
-    earliestDate !== "No Dates Available" &&
-    earliestDate !== "Checked (No Slots)" &&
-    earliestDate !== "N/A" &&
-    earliestDate !== "No appointments available" &&
-    slotsCount &&
-    slotsCount !== "0" &&
-    slotsCount !== 0;
+  const hasValidDateOpening =
+    !!earliestDate &&
+    !["No Dates Available", "Checked (No Slots)", "N/A", "No appointments available", "Waiting for network dates"].includes(String(earliestDate).trim());
 
-  if (isAvailableOpening && (pageType === "OFC" || pageType === "Consular")) {
+  let effectiveSlotsCount = slotsCount;
+  if (available === true && hasValidDateOpening && (!effectiveSlotsCount || effectiveSlotsCount === "0" || effectiveSlotsCount === "N/A")) {
+    effectiveSlotsCount = "1";
+  }
+
+  const isConfirmedOpeningForWeb =
+    available === true &&
+    hasValidDateOpening &&
+    !!effectiveSlotsCount && String(effectiveSlotsCount) !== "0" && String(effectiveSlotsCount) !== "N/A";
+
+  if (isConfirmedOpeningForWeb && group) {
     try {
       const isVAC = canonicalLoc.includes("VAC");
       await Update.create({
         category: group,
         location: canonicalLoc,
-        type: `${group} (Regular)`,
+        type: `${group} (${isVAC ? "VAC/OFC" : "Consular"})`,
         date: earliestDate,
-        count: slotsCount,
+        count: effectiveSlotsCount,
         totalDates: totalDatesCount || "1",
         note: `Verified ${isVAC ? "OFC/VAC" : "Consulate"} slot detection for ${group} @ ${canonicalLoc}`,
         screenshotUrl: screenshot || null,
         source: "extension",
         capturedAt: when,
       });
-      console.log(`[events] ⚡ Public website overview updated immediately for ${group} @ ${canonicalLoc}`);
+      console.log(`[events] ⚡ Public website overview updated immediately for ${group} @ ${canonicalLoc}: ${earliestDate} (${effectiveSlotsCount} slots)`);
     } catch (err) {
       console.error("[events] Live update sync error:", err.message);
     }
@@ -220,7 +224,7 @@ router.post("/", eventLimiter, requireAdminOrExtensionKey, async (req, res) => {
     lastChangeAt: event.detectedAt,
   });
 
-  const delayMins = 10;
+  const delayMins = Number.isFinite(env.alertDelayMinutes) && env.alertDelayMinutes >= 0 ? env.alertDelayMinutes : 5;
   const delayMs = delayMins * 60 * 1000;
 
   const alertPayload = {
@@ -261,6 +265,48 @@ router.post("/", eventLimiter, requireAdminOrExtensionKey, async (req, res) => {
     );
   }
 
+  // Queue only verified positive openings for the three client-facing categories.
+  // Telegram remains independent and keeps its existing behavior.
+  const hasValidDate =
+    !!earliestDate &&
+    !["No Dates Available", "Checked (No Slots)", "N/A", "No appointments available", "Waiting for network dates"].includes(String(earliestDate).trim());
+
+  let effectiveSlots = slotsCount;
+  if (available === true && hasValidDate && (!effectiveSlots || effectiveSlots === "0" || effectiveSlots === "N/A")) {
+    effectiveSlots = "1";
+  }
+
+  const isConfirmedOpening =
+    available === true &&
+    hasValidDate &&
+    !!effectiveSlots && String(effectiveSlots) !== "0" && String(effectiveSlots) !== "N/A";
+
+  const whatsappGroup = ["B1/B2", "F1/F2", "H1B/H4"].includes(group) ? group : null;
+  if (isConfirmedOpening && whatsappGroup) {
+    // 1-minute cooling period: allows real-time updates every minute while eliminating multi-employee microbursts
+    const dedupeBucket = Math.floor(Date.now() / (1 * 60 * 1000));
+    const dedupeKey = require("crypto").createHash("sha256").update([
+      whatsappGroup, canonicalLoc, pageType || "", String(earliestDate), dedupeBucket
+    ].join("|")).digest("hex");
+    try {
+      await WhatsAppJob.updateOne(
+        { dedupeKey },
+        { $setOnInsert: {
+          dedupeKey, category, group: whatsappGroup, location: canonicalLoc, pageType,
+          earliestDate: String(earliestDate), slots: String(effectiveSlots),
+          totalDates: String(totalDatesCount || ""), screenshot: screenshot || null,
+          detectedAt: new Date(when), scheduledAt: new Date(Date.now() + delayMs),
+          status: "pending", attempts: 0
+        } },
+        { upsert: true }
+      );
+      console.log(`[events] WhatsApp queue prepared for ${whatsappGroup} @ ${canonicalLoc}; delay ${delayMins}m`);
+    } catch (queueErr) {
+      // Duplicate-key races are expected if several employee computers detect the same slot.
+      if (queueErr.code !== 11000) console.error("[events] WhatsApp queue error:", queueErr.message);
+    }
+  }
+
   res.status(201).json({ ok: true, id: event._id, delayedMinutes: delayMins });
 });
 
@@ -287,8 +333,9 @@ async function publishAlert({
   // Alerts to Telegram
   if (telegram) {
     const timeStr = fmtIST(when) + " IST";
-    const delayNotice = "10 Minutes (Sent after 10 mins)";
-    const delayLine = `⏳ Feed Delay:          10 Minutes (Sent after 10 mins)\n⚠️ Note:                Screenshot captured 10 mins ago\n`;
+    const delayVal = delayMins !== undefined ? delayMins : 5;
+    const delayNotice = delayVal + " Minutes Delay";
+    const delayLine = "⏳ Feed Delay:          " + delayVal + " Minutes\n";
     const isAvailable =
       available === true &&
       earliestDate &&
@@ -317,7 +364,8 @@ async function publishAlert({
         `🕒 Detected At:         ${timeStr}\n` +
         delayLine +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🌐 Track Live: usvisaslotsupdate.com`;
+        `🌐 Track Live: usvisaslotsupdate.com\n` +
+        `📞 For slot bookings contact: 8143852523`;
     } else {
       caption =
         `🇺🇸 US VISA APPOINTMENT UPDATE\n` +
