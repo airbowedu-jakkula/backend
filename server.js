@@ -1,4 +1,3 @@
-
 require("express-async-errors");
 
 const env = require("./config/env");
@@ -149,37 +148,48 @@ app.use(errorHandler);
 // DATABASE CONNECTION AND SERVER STARTUP
 // --------------------------------------------------
 
-let server;
+// Start Express immediately so cloud health checks and port bindings (Render, AWS, etc.)
+// succeed instantly within milliseconds of launch.
+const server = app.listen(env.port, "0.0.0.0", () => {
+  console.log(`[http] listening on 0.0.0.0:${env.port} (env: ${env.nodeEnv})`);
+});
 
-mongoose
-  .connect(env.mongoUri)
-  .then(async () => {
-    console.log("[db] MongoDB connected");
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `[http] port ${env.port} is already in use. ` +
+      "Stop the other server or change PORT in .env."
+    );
+  } else {
+    console.error("[http]", err.message);
+  }
 
-    await seedAdmin();
-    await seedNews();
+  process.exit(1);
+});
 
-    server = app.listen(env.port, () => {
-      console.log(`[http] listening on port ${env.port}`);
+// Asynchronously connect to MongoDB Atlas with auto-retry
+async function connectDB() {
+  if (!env.mongoUri) {
+    console.warn("[db] MONGO_URI not provided. Skipping database connection until configured.");
+    return;
+  }
+
+  try {
+    await mongoose.connect(env.mongoUri, {
+      serverSelectionTimeoutMS: 15000,
     });
+    console.log("[db] MongoDB connected successfully");
 
-    server.on("error", (err) => {
-      if (err.code === "EADDRINUSE") {
-        console.error(
-          `[http] port ${env.port} is already in use. ` +
-          "Stop the other server or change PORT in .env."
-        );
-      } else {
-        console.error("[http]", err.message);
-      }
+    await seedAdmin().catch((e) => console.error("[seedAdmin]", e.message));
+    await seedNews().catch((e) => console.error("[seedNews]", e.message));
+  } catch (err) {
+    console.error("[db] MongoDB connection error:", err.message);
+    console.log("[db] Retrying connection in 5 seconds...");
+    setTimeout(connectDB, 5000);
+  }
+}
 
-      process.exit(1);
-    });
-  })
-  .catch((err) => {
-    console.error("[db] connection failed:", err.message);
-    process.exit(1);
-  });
+connectDB();
 
 // --------------------------------------------------
 // GRACEFUL SHUTDOWN
