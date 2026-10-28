@@ -18,17 +18,22 @@ function fmtIST(d) {
   return new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
 }
 
-function normalizeLocation(loc) {
-  if (!loc) return "CHENNAI VAC";
-  const s = String(loc).trim();
-  const lower = s.toLowerCase();
-  if (lower.includes("chennai")) return "CHENNAI VAC";
-  if (lower.includes("hyderabad")) return "HYDERABAD VAC";
-  if (lower.includes("delhi")) return "NEW DELHI VAC";
-  if (lower.includes("mumbai")) return "MUMBAI VAC";
-  if (lower.includes("kolkata")) return "KOLKATA VAC";
-  if (lower.includes("bengaluru") || lower.includes("bangalore")) return "BENGALURU VAC";
-  return s.toUpperCase();
+function normalizeLocation(loc, pt) {
+  if (!loc) return pt === "Consular" ? "CHENNAI CONSULAR" : "CHENNAI VAC";
+  const s = String(loc).trim().toUpperCase();
+  const isConsular = pt === "Consular" || s.includes("CONSULAR") || s.includes("CONSULATE") || s.includes("INTERVIEW");
+  const suffix = isConsular ? "CONSULAR" : "VAC";
+
+  let city = "CHENNAI";
+  if (s.includes("HYDERABAD")) city = "HYDERABAD";
+  else if (s.includes("MUMBAI")) city = "MUMBAI";
+  else if (s.includes("KOLKATA")) city = "KOLKATA";
+  else if (s.includes("DELHI")) city = "NEW DELHI";
+  else if (s.includes("CHENNAI")) city = "CHENNAI";
+  else if (s.includes("BENGALURU") || s.includes("BANGALORE")) city = "BENGALURU";
+  else return s;
+
+  return `${city} ${suffix}`;
 }
 
 async function upsertStatus(category, location, group, patch) {
@@ -137,16 +142,7 @@ router.post("/", eventLimiter, requireAdminOrExtensionKey, async (req, res) => {
   const when = detectedAt || new Date();
 
   function normalizeCanonicalLocation(loc, pt) {
-    if (!loc) return pt === "OFC" ? "CHENNAI VAC" : "CHENNAI";
-    const s = String(loc).trim().toUpperCase();
-    const isVAC = s.includes("VAC") || s.includes("OFC") || pt === "OFC" || s.includes("BIOMETRIC");
-    let city = "CHENNAI";
-    if (s.includes("HYDERABAD")) city = "HYDERABAD";
-    else if (s.includes("MUMBAI")) city = "MUMBAI";
-    else if (s.includes("KOLKATA")) city = "KOLKATA";
-    else if (s.includes("DELHI")) city = "NEW DELHI";
-    else if (s.includes("CHENNAI")) city = "CHENNAI";
-    return isVAC ? `${city} VAC` : city;
+    return normalizeLocation(loc, pt);
   }
 
   const canonicalLoc = normalizeCanonicalLocation(location, pageType);
@@ -224,7 +220,7 @@ router.post("/", eventLimiter, requireAdminOrExtensionKey, async (req, res) => {
     lastChangeAt: event.detectedAt,
   });
 
-  const delayMins = Number.isFinite(env.alertDelayMinutes) && env.alertDelayMinutes >= 0 ? env.alertDelayMinutes : 5;
+  const delayMins = Number.isFinite(env.alertDelayMinutes) && env.alertDelayMinutes >= 0 ? env.alertDelayMinutes : 10;
   const delayMs = delayMins * 60 * 1000;
 
   const alertPayload = {
@@ -333,7 +329,7 @@ async function publishAlert({
   // Alerts to Telegram
   if (telegram) {
     const timeStr = fmtIST(when) + " IST";
-    const delayVal = delayMins !== undefined ? delayMins : 5;
+    const delayVal = delayMins !== undefined ? delayMins : 10;
     const delayNotice = delayVal + " Minutes Delay";
     const delayLine = "⏳ Feed Delay:          " + delayVal + " Minutes\n";
     const isAvailable =

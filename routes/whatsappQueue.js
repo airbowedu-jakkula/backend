@@ -55,7 +55,7 @@ router.get("/next", requirePublisher, async (req, res) => {
         : "Slots Available";
     const totalDisplay = job.totalDates && job.totalDates !== "0" ? `${job.totalDates} Dates Open` : null;
     const timeStr = new Date(job.detectedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) + " IST";
-    const delayMins = env.alertDelayMinutes || 5;
+    const delayMins = env.alertDelayMinutes !== undefined ? env.alertDelayMinutes : 10;
     const delayLine =
       delayMins > 0
         ? `*⏳ Feed Delay:*          ${delayMins} Minutes`

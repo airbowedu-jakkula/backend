@@ -45,7 +45,7 @@ const env = {
     defaultChannel: optional("TELEGRAM_CHAT_ID_DEFAULT"),
   },
 
-  alertDelayMinutes: parseInt(optional("ALERT_DELAY_MINUTES", "5"), 10),
+  alertDelayMinutes: parseInt(optional("ALERT_DELAY_MINUTES", "10"), 10),
   whatsapp: {
     // Set in backend/.env or Render environment variables; never put in the extension.
     publisherToken: optional("WHATSAPP_PUBLISHER_TOKEN"),

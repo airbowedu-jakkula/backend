@@ -6,3 +6,4 @@ module.exports = {
   // On AWS/production, Chrome is installed via apt-get at /usr/bin/google-chrome
   skipDownload: true,
 };
+
